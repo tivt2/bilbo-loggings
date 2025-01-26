@@ -1,0 +1,17 @@
+{
+  "name": "bilbo-loggings",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "build": "rm -rf dist/ && npx tsc",
+    "start": "npm run build && node dist/index.js",
+    "dev": "node src/index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
