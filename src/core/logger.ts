@@ -1,27 +1,31 @@
 import fs from "fs"
 import path from "path"
 
-type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR"
-type LogFields = { [key: string]: any }
+type LoggerFields = {
+    level: Uppercase<string>
+    [key: string]: any
+}
 
-export class Logger<T extends LogFields> {
-    private log_entry: { level?: LogLevel } & Partial<T> = {}
+export class Logger<F extends LoggerFields> {
+    private log_entry: Partial<F> = {}
 
     private file_name = ""
-    private fd: number = -1
-    private file_stream: fs.WriteStream
+    private stream: fs.WriteStream
 
     constructor(
         private folder_path: string,
         private infix: string
     ) {
         folder_path = path.normalize(folder_path)
-        fs.mkdirSync(folder_path, { recursive: true })
+        if (!fs.existsSync(folder_path)) {
+            fs.mkdirSync(folder_path, { recursive: true })
+        }
+
         this.file_name = this.get_file_name(this.infix)
         const file_path = path.join(this.folder_path, this.file_name)
 
-        this.fd = fs.openSync(file_path, "w")
-        this.file_stream = fs.createWriteStream("", { fd: this.fd, flags: "a" })
+        fs.appendFileSync(file_path, "")
+        this.stream = fs.createWriteStream(file_path, { flags: "a" })
     }
 
     private get_file_name(infix: string): string {
@@ -33,37 +37,22 @@ export class Logger<T extends LogFields> {
         return file_name
     }
 
-    debug(): Logger<T> {
-        this.log_entry.level = "DEBUG"
+    level(level: F["level"]) {
+        this.log_entry.level = level
         return this
     }
 
-    info(): Logger<T> {
-        this.log_entry.level = "INFO"
-        return this
-    }
-
-    warn(): Logger<T> {
-        this.log_entry.level = "WARN"
-        return this
-    }
-
-    error(): Logger<T> {
-        this.log_entry.level = "ERROR"
-        return this
-    }
-
-    field<K extends keyof T>(key: K, val: T[K]): Logger<T> {
-        this.log_entry[key] = val
+    add<K extends keyof Omit<F, "level">>(key: K, value: F[K]) {
+        this.log_entry[key] = value
         return this
     }
 
     log(): void {
         if (!this.log_entry.level) {
-            throw new Error("Missing level")
+            throw new Error("Log must have a valid level")
         }
 
-        this.file_stream.write(JSON.stringify(this.log_entry) + "\n")
+        this.stream.write(JSON.stringify(this.log_entry) + "\n")
 
         for (const key of Object.keys(this.log_entry)) {
             if (key !== "level") delete this.log_entry[key]
