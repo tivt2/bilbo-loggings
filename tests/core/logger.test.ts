@@ -15,7 +15,7 @@ function get_log_path(folder_path: string, infix: string): string {
 
 describe("logger basic test", () => {
     const folder_path = path.normalize("./tests/log-files")
-    const infix = "foo"
+    const file_infix = "foo"
 
     const original_createWriteStream = fs.createWriteStream
     beforeAll(() => {
@@ -42,17 +42,20 @@ describe("logger basic test", () => {
     })
 
     test("logger create folder if not exists and file", () => {
-        const file_path = get_log_path(folder_path, infix)
+        const file_path = get_log_path(folder_path, file_infix)
 
-        new Logger(folder_path, infix)
+        new Logger({
+            folder_path,
+            file_infix,
+        })
 
         expect(fs.existsSync(folder_path), "log folder dont exist").toBeTruthy()
         expect(fs.existsSync(file_path), "log file dont exist").toBeTruthy()
     })
 
-    test("correct log to file", async () => {
+    test("correct log to file", () => {
         type LogEntry = {
-            level: "INFO"
+            level: "INFO" | "WARN"
             message: string
             id: number
             meta: {
@@ -60,7 +63,14 @@ describe("logger basic test", () => {
             }
         }
 
-        const logger = new Logger<LogEntry>(folder_path, infix)
+        const logger = new Logger<LogEntry>({
+            folder_path,
+            file_infix,
+            print_mode: {
+                levels: ["INFO"],
+                pretty: true,
+            },
+        })
         const log_entry = {
             level: "INFO",
             message: "log message",
@@ -72,12 +82,12 @@ describe("logger basic test", () => {
 
         logger
             .level("INFO")
-            .add("message", log_entry.message)
+            .message(log_entry.message)
             .add("id", log_entry.id)
             .add("meta", log_entry.meta)
             .log()
 
-        const file_path = get_log_path(folder_path, infix)
+        const file_path = get_log_path(folder_path, file_infix)
         expect(fs.existsSync(file_path), "log file dont exist").toBeTruthy()
 
         let file_data = String(fs.readFileSync(file_path))
@@ -86,7 +96,7 @@ describe("logger basic test", () => {
 
         logger
             .level("INFO")
-            .add("message", log_entry.message)
+            .message(log_entry.message)
             .add("id", log_entry.id)
             .add("meta", log_entry.meta)
             .log()
