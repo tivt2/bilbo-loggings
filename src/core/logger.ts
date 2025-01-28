@@ -1,6 +1,6 @@
-import assert from "assert"
 import fs from "fs"
 import path from "path"
+import { exec } from "child_process"
 
 type LoggerGenericKeys<F extends LoggerFields> = Omit<
     Omit<F, "level">,
@@ -21,6 +21,7 @@ export type LoggerFields = {
 export type LoggerOptions<F extends LoggerFields> = {
     folder_path: string
     file_infix: string
+    logs_until_rotation: number
     print_mode?: LoggerPrintModes<F>
 }
 
@@ -31,8 +32,9 @@ export class Logger<F extends LoggerFields> {
     private file_name
     private file_path
     private file_cur_lines
+    private file_cur_id
     private stream: fs.WriteStream
-    private rotate_path
+    private rotate_folder_path
 
     constructor(private opts: LoggerOptions<F>) {
         this.opts.folder_path = path.normalize(this.opts.folder_path)
@@ -40,24 +42,36 @@ export class Logger<F extends LoggerFields> {
             fs.mkdirSync(this.opts.folder_path, { recursive: true })
         }
 
-        this.rotate_path = path.join(this.opts.folder_path, "rotate")
+        this.rotate_folder_path = path.join(this.opts.folder_path, "rotate")
         this.file_regex = new RegExp(
             `bilbo-${this.opts.file_infix}-(\\d{4})-(\\d{1,2})-(\\d{1,2})-(\\d+)`
         )
 
+        if (!fs.existsSync(this.rotate_folder_path)) {
+            this.file_cur_id = this.retrieve_file_id(
+                this.opts.folder_path,
+                ".log"
+            )
+        } else {
+            this.file_cur_id = Math.max(
+                this.retrieve_file_id(this.opts.folder_path, ".log"),
+                this.retrieve_file_id(this.rotate_folder_path, ".log.gz")
+            )
+        }
+
         this.file_name = this.recover_folder()
         if (this.file_name === "") {
-            this.file_name = this.generate_file_name()
+            this.file_cur_id++
+            this.file_name = this.generate_file_name(this.file_cur_id)
         }
         this.file_path = path.join(this.opts.folder_path, this.file_name)
 
         if (!fs.existsSync(this.file_path)) {
             fs.appendFileSync(this.file_path, "")
         }
-        this.file_cur_lines = fs
-            .readFileSync(this.file_path, "utf8")
-            .trim()
-            .split("\n").length
+        const file_data = fs.readFileSync(this.file_path, "utf8")
+        this.file_cur_lines =
+            file_data.length === 0 ? 0 : file_data.trim().split("\n").length
 
         this.stream = fs.createWriteStream(this.file_path, { flags: "a" })
 
@@ -77,28 +91,26 @@ export class Logger<F extends LoggerFields> {
         )
     }
 
-    // generate file name with correct id based on
-    // rotation folder files that have same date
-    private generate_file_name(): string {
-        let cur = 1
-        if (fs.existsSync(this.rotate_path)) {
-            const rotate_files = this.get_valid_files(
-                this.rotate_path,
-                ".log.gz"
-            )
-            if (
-                rotate_files.length > 0 &&
-                this.is_today_file(rotate_files[0])
-            ) {
-                cur = Number(rotate_files[0].match(this.file_regex)![4]) + 1
-            }
+    // retrieve the id + 1 for files in folder
+    // that match file_regex
+    private retrieve_file_id(folder_path: string, ext: string): number {
+        const valid_files = this.get_valid_files(folder_path, ext)
+
+        if (valid_files.length === 0 || !this.is_today_file(valid_files[0])) {
+            return 0
         }
 
+        return Number(valid_files[0].match(this.file_regex)![4])
+    }
+
+    // generate file name with correct id based on
+    // rotation folder files that have same date
+    private generate_file_name(id: number): string {
         const now = new Date()
         const year = now.getUTCFullYear()
         const month = now.getUTCMonth() + 1
         const day = now.getUTCDate()
-        const file_name = `bilbo-${this.opts.file_infix}-${year}-${month}-${day}-${cur}.log`
+        const file_name = `bilbo-${this.opts.file_infix}-${year}-${month}-${day}-${id}.log`
 
         return file_name
     }
@@ -134,7 +146,7 @@ export class Logger<F extends LoggerFields> {
             return ""
         }
 
-        for (let i = valid_files.length - 1; i >= 0; i--) {
+        for (let i = valid_files.length - 1; i > 0; i--) {
             this.rotate_file(valid_files[i])
         }
 
@@ -146,8 +158,51 @@ export class Logger<F extends LoggerFields> {
         return valid_files[0]
     }
 
+    // assume the file_name exists
+    // compress file using gzip and
+    // moving it to rotate_folder
     private rotate_file(file_name: string): void {
-        return
+        const file_path = path.join(this.opts.folder_path, file_name)
+
+        exec(`gzip ${file_path}`, (err) => {
+            if (err) {
+                console.error(`Failed to rotate file: ${file_path}`)
+                return
+            }
+
+            const rotate_file_path =
+                path.join(this.rotate_folder_path, file_name) + ".gz"
+            if (!fs.existsSync(this.rotate_folder_path)) {
+                fs.mkdirSync(this.rotate_folder_path)
+            }
+            fs.renameSync(file_path + ".gz", rotate_file_path)
+
+            console.log(`File: ${file_path} rotated successfully`)
+        })
+    }
+
+    private rotate_cur_file(): void {
+        const old_stream = this.stream
+        const old_file_name = this.file_name
+
+        old_stream.end()
+        old_stream.on("finish", () => {
+            this.rotate_file(old_file_name)
+
+            old_stream.close()
+        })
+        old_stream.on("error", (err) => {
+            console.error(`Failed to finish stream ${old_file_name}`)
+            console.error(err)
+        })
+
+        this.file_cur_id++
+        this.file_name = this.generate_file_name(this.file_cur_id)
+        this.file_path = path.join(this.opts.folder_path, this.file_name)
+
+        fs.appendFileSync(this.file_path, "")
+        this.file_cur_lines = 0
+        this.stream = fs.createWriteStream(this.file_path, { flags: "a" })
     }
 
     // assumes options.print_mode != undefined
@@ -181,6 +236,10 @@ export class Logger<F extends LoggerFields> {
             throw new Error("Log entry must have a valid level")
         }
 
+        if (this.file_cur_lines >= this.opts.logs_until_rotation) {
+            this.rotate_cur_file()
+        }
+
         if (
             this.opts.print_mode !== undefined &&
             this.opts.print_mode.levels.includes(this.log_entry.level)
@@ -191,6 +250,7 @@ export class Logger<F extends LoggerFields> {
         if (!this.stream.write(JSON.stringify(this.log_entry) + "\n")) {
             throw new Error("Log was not writen to file")
         }
+        this.file_cur_lines++
 
         for (const key of Object.keys(this.log_entry)) {
             delete this.log_entry[key]

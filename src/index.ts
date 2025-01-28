@@ -12,6 +12,7 @@ type LogFields = {
 const opts: LoggerOptions<LogFields> = {
     folder_path: "./tests/log-files",
     file_infix: "foo",
+    logs_until_rotation: 10,
     print_mode: {
         levels: ["WARN"],
         pretty: true,
@@ -20,16 +21,11 @@ const opts: LoggerOptions<LogFields> = {
 
 const logger = new Logger<LogFields>(opts)
 
-logger
-    .level("INFO")
-    .message("info message")
-    .add("id", 12)
-    .add("meta", { desc: "info meta description" })
-    .log()
-
-logger
-    .level("WARN")
-    .message("warn message")
-    .add("id", 12)
-    .add("meta", { desc: "warn meta description" })
-    .log()
+for (let i = 0; i < 23; i++) {
+    logger
+        .level("INFO")
+        .message("info message")
+        .add("id", i)
+        .add("meta", { desc: "info meta description" })
+        .log()
+}

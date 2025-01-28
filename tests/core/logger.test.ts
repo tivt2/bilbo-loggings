@@ -57,6 +57,7 @@ describe("logger basic test", () => {
     const logOpts: LoggerOptions<LogEntry> = {
         folder_path,
         file_infix,
+        logs_until_rotation: 10,
         print_mode: {
             levels: ["INFO"],
             pretty: true,
@@ -81,6 +82,7 @@ describe("logger basic test", () => {
         new Logger<LogEntry>({
             folder_path,
             file_infix,
+            logs_until_rotation: 10,
         })
 
         expect(fs.existsSync(folder_path), "log folder dont exist").toBeTruthy()
