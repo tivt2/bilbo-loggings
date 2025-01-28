@@ -2,12 +2,6 @@ import assert from "assert"
 import fs from "fs"
 import path from "path"
 
-type LoggerFields = {
-    level: Uppercase<string>
-    message: string
-    [key: string]: any
-}
-
 type LoggerGenericKeys<F extends LoggerFields> = Omit<
     Omit<F, "level">,
     "message"
@@ -18,7 +12,13 @@ type LoggerPrintModes<F extends LoggerFields> = {
     pretty: boolean
 }
 
-type LoggerOptions<F extends LoggerFields> = {
+export type LoggerFields = {
+    level: Uppercase<string>
+    message: string
+    [key: string]: any
+}
+
+export type LoggerOptions<F extends LoggerFields> = {
     folder_path: string
     file_infix: string
     print_mode?: LoggerPrintModes<F>
@@ -27,38 +27,132 @@ type LoggerOptions<F extends LoggerFields> = {
 export class Logger<F extends LoggerFields> {
     private log_entry: Partial<F> = {}
 
+    private file_regex
     private file_name
+    private file_path
+    private file_cur_lines
     private stream: fs.WriteStream
+    private rotate_path
 
-    constructor(private options: LoggerOptions<F>) {
-        this.options.folder_path = path.normalize(this.options.folder_path)
-        if (!fs.existsSync(this.options.folder_path)) {
-            fs.mkdirSync(this.options.folder_path, { recursive: true })
+    constructor(private opts: LoggerOptions<F>) {
+        this.opts.folder_path = path.normalize(this.opts.folder_path)
+        if (!fs.existsSync(this.opts.folder_path)) {
+            fs.mkdirSync(this.opts.folder_path, { recursive: true })
         }
 
-        this.file_name = this.get_file_name(this.options.file_infix)
-        const file_path = path.join(this.options.folder_path, this.file_name)
+        this.rotate_path = path.join(this.opts.folder_path, "rotate")
+        this.file_regex = new RegExp(
+            `bilbo-${this.opts.file_infix}-(\\d{4})-(\\d{1,2})-(\\d{1,2})-(\\d+)`
+        )
 
-        fs.appendFileSync(file_path, "")
-        this.stream = fs.createWriteStream(file_path, { flags: "a" })
+        this.file_name = this.recover_folder()
+        if (this.file_name === "") {
+            this.file_name = this.generate_file_name()
+        }
+        this.file_path = path.join(this.opts.folder_path, this.file_name)
+
+        if (!fs.existsSync(this.file_path)) {
+            fs.appendFileSync(this.file_path, "")
+        }
+        this.file_cur_lines = fs
+            .readFileSync(this.file_path, "utf8")
+            .trim()
+            .split("\n").length
+
+        this.stream = fs.createWriteStream(this.file_path, { flags: "a" })
+
+        console.log(`Logging to file: ${this.file_path}`)
+        console.log(`Line count: ${this.file_cur_lines}`)
+        console.log("----------------------")
     }
 
-    private get_file_name(infix: string): string {
+    // assumes file_name is a string that matches this.file_regex
+    private is_today_file(file_name: string): boolean {
+        const [_, year, month, day] = file_name.match(this.file_regex)!
+        const now = new Date()
+        return (
+            now.getUTCFullYear() === Number(year) &&
+            now.getUTCMonth() + 1 === Number(month) &&
+            now.getUTCDate() === Number(day)
+        )
+    }
+
+    // generate file name with correct id based on
+    // rotation folder files that have same date
+    private generate_file_name(): string {
+        let cur = 1
+        if (fs.existsSync(this.rotate_path)) {
+            const rotate_files = this.get_valid_files(
+                this.rotate_path,
+                ".log.gz"
+            )
+            if (
+                rotate_files.length > 0 &&
+                this.is_today_file(rotate_files[0])
+            ) {
+                cur = Number(rotate_files[0].match(this.file_regex)![4]) + 1
+            }
+        }
+
         const now = new Date()
         const year = now.getUTCFullYear()
         const month = now.getUTCMonth() + 1
         const day = now.getUTCDate()
-        const file_name = `bilbo-${infix}-${year}-${month}-${day}.log`
+        const file_name = `bilbo-${this.opts.file_infix}-${year}-${month}-${day}-${cur}.log`
+
         return file_name
     }
 
-    private print_log(): void {
-        assert(
-            this.options.print_mode !== undefined,
-            "decode_slim() assume options.print_mode != undefined"
-        )
+    // return files with valid naming that match
+    // logger infix, sorted by year-month-day-id
+    private get_valid_files(folder_path: string, ext: string): string[] {
+        const file_w_ext_regex = new RegExp(this.file_regex.source + ext)
+        const valid_files = fs
+            .readdirSync(folder_path)
+            .filter((file) => file.match(file_w_ext_regex))
+            .sort((a, b) => {
+                const match1 = a.match(file_w_ext_regex)
+                const match2 = b.match(file_w_ext_regex)
+                const yearDiff = Number(match2![1]) - Number(match1![1])
+                if (yearDiff !== 0) return yearDiff
+                const monthDiff = Number(match2![2]) - Number(match1![2])
+                if (monthDiff !== 0) return monthDiff
+                const dayDiff = Number(match2![3]) - Number(match1![3])
+                if (dayDiff !== 0) return dayDiff
+                return Number(match2![4]) - Number(match1![4])
+            })
 
-        if (this.options.print_mode.pretty) {
+        return valid_files
+    }
+
+    // check folder files for valid files
+    // rotate the files that are 'old'
+    // return the newest file if it matches the current date
+    private recover_folder(): string {
+        const valid_files = this.get_valid_files(this.opts.folder_path, ".log")
+        if (valid_files.length == 0) {
+            return ""
+        }
+
+        for (let i = valid_files.length - 1; i >= 0; i--) {
+            this.rotate_file(valid_files[i])
+        }
+
+        if (!this.is_today_file(valid_files[0])) {
+            this.rotate_file(valid_files[0])
+            return ""
+        }
+
+        return valid_files[0]
+    }
+
+    private rotate_file(file_name: string): void {
+        return
+    }
+
+    // assumes options.print_mode != undefined
+    private print_log(): void {
+        if (this.opts.print_mode!.pretty) {
             console.log(
                 `\x1b[48;5;15m\x1b[38;5;16m ${this.log_entry.level} \x1b[m ${this.log_entry.message}`
             )
@@ -84,21 +178,22 @@ export class Logger<F extends LoggerFields> {
 
     log(): void {
         if (!this.log_entry.level) {
-            throw new Error("Log must have a valid level")
+            throw new Error("Log entry must have a valid level")
         }
 
         if (
-            this.options.print_mode !== undefined &&
-            this.options.print_mode.levels.includes(this.log_entry.level)
+            this.opts.print_mode !== undefined &&
+            this.opts.print_mode.levels.includes(this.log_entry.level)
         ) {
             this.print_log()
         }
 
-        this.stream.write(JSON.stringify(this.log_entry) + "\n")
+        if (!this.stream.write(JSON.stringify(this.log_entry) + "\n")) {
+            throw new Error("Log was not writen to file")
+        }
 
         for (const key of Object.keys(this.log_entry)) {
-            if (key !== "level") delete this.log_entry[key]
+            delete this.log_entry[key]
         }
-        this.log_entry.level = undefined
     }
 }

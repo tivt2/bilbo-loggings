@@ -1,14 +1,18 @@
 import fs from "fs"
 import path from "path"
 import { describe, test, expect, beforeAll, afterAll } from "vitest"
-import { Logger } from "../../src/core/logger"
+import { Logger, LoggerOptions } from "../../src/core/logger"
 
-function get_log_path(folder_path: string, infix: string): string {
+function generate_file_path(
+    folder_path: string,
+    infix: string,
+    id: number
+): string {
     const now = new Date()
     const year = now.getUTCFullYear()
     const month = now.getUTCMonth() + 1
     const day = now.getUTCDate()
-    const file_name = `bilbo-${infix}-${year}-${month}-${day}.log`
+    const file_name = `bilbo-${infix}-${year}-${month}-${day}-${id}.log`
     const file_path = path.normalize(path.join(folder_path, file_name))
     return file_path
 }
@@ -38,13 +42,43 @@ describe("logger basic test", () => {
     })
 
     afterAll(() => {
+        // return createWriteStream to the original function
         fs.createWriteStream = original_createWriteStream
     })
 
-    test("logger create folder if not exists and file", () => {
-        const file_path = get_log_path(folder_path, file_infix)
+    type LogEntry = {
+        level: "INFO" | "WARN"
+        message: string
+        id: number
+        meta: {
+            description: string
+        }
+    }
+    const logOpts: LoggerOptions<LogEntry> = {
+        folder_path,
+        file_infix,
+        print_mode: {
+            levels: ["INFO"],
+            pretty: true,
+        },
+    }
 
-        new Logger({
+    const log_entry = {
+        level: "INFO",
+        message: "log message",
+        id: 12,
+        meta: {
+            description: "foo description",
+        },
+    }
+
+    const file_path = generate_file_path(folder_path, file_infix, 1)
+
+    // order of tests matter
+    test("logger create folder if not exists and file", () => {
+        const file_path = generate_file_path(folder_path, file_infix, 1)
+
+        new Logger<LogEntry>({
             folder_path,
             file_infix,
         })
@@ -54,45 +88,9 @@ describe("logger basic test", () => {
     })
 
     test("correct log to file", () => {
-        type LogEntry = {
-            level: "INFO" | "WARN"
-            message: string
-            id: number
-            meta: {
-                description: string
-            }
-        }
-
-        const logger = new Logger<LogEntry>({
-            folder_path,
-            file_infix,
-            print_mode: {
-                levels: ["INFO"],
-                pretty: true,
-            },
-        })
-        const log_entry = {
-            level: "INFO",
-            message: "log message",
-            id: 12,
-            meta: {
-                description: "foo description",
-            },
-        }
-
-        logger
-            .level("INFO")
-            .message(log_entry.message)
-            .add("id", log_entry.id)
-            .add("meta", log_entry.meta)
-            .log()
-
-        const file_path = get_log_path(folder_path, file_infix)
         expect(fs.existsSync(file_path), "log file dont exist").toBeTruthy()
 
-        let file_data = String(fs.readFileSync(file_path))
-        let log_str = JSON.stringify(log_entry) + "\n"
-        expect(file_data, file_path).toEqual(log_str)
+        const logger = new Logger<LogEntry>(logOpts)
 
         logger
             .level("INFO")
@@ -101,8 +99,25 @@ describe("logger basic test", () => {
             .add("meta", log_entry.meta)
             .log()
 
-        file_data = String(fs.readFileSync(file_path))
-        log_str += JSON.stringify(log_entry) + "\n"
+        const file_data = String(fs.readFileSync(file_path))
+        const log_str = JSON.stringify(log_entry) + "\n"
+        expect(file_data, file_path).toEqual(log_str)
+    })
+
+    test("correct second log to file", () => {
+        expect(fs.existsSync(file_path), "log file dont exist").toBeTruthy()
+
+        const logger = new Logger<LogEntry>(logOpts)
+        logger
+            .level("INFO")
+            .message(log_entry.message)
+            .add("id", log_entry.id)
+            .add("meta", log_entry.meta)
+            .log()
+
+        const file_data = String(fs.readFileSync(file_path))
+        const log_str =
+            JSON.stringify(log_entry) + "\n" + JSON.stringify(log_entry) + "\n"
         expect(file_data).toEqual(log_str)
     })
 })
