@@ -11,8 +11,8 @@ type LogFields = {
 }
 const opts: LoggerOptions<LogFields> = {
     folder_path: "./tests/log-files",
-    file_infix: "foo",
-    logs_until_rotation: 10,
+    infix: "foo",
+    max_logs: 10,
     print_mode: {
         levels: ["WARN"],
         pretty: true,

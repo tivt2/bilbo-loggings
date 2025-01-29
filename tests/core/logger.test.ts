@@ -46,7 +46,7 @@ describe("logger basic test", () => {
         fs.createWriteStream = original_createWriteStream
     })
 
-    type LogEntry = {
+    type LoggerEntry = {
         level: "INFO" | "WARN"
         message: string
         id: number
@@ -54,17 +54,13 @@ describe("logger basic test", () => {
             description: string
         }
     }
-    const logOpts: LoggerOptions<LogEntry> = {
-        folder_path,
-        file_infix,
-        logs_until_rotation: 10,
-        print_mode: {
-            levels: ["INFO"],
-            pretty: true,
-        },
+    const logOpts: LoggerOptions<LoggerEntry> = {
+        folder_path: folder_path,
+        infix: file_infix,
+        max_logs: 10,
     }
 
-    const log_entry = {
+    const log_entry: LoggerEntry = {
         level: "INFO",
         message: "log message",
         id: 12,
@@ -79,10 +75,10 @@ describe("logger basic test", () => {
     test("logger create folder if not exists and file", () => {
         const file_path = generate_file_path(folder_path, file_infix, 1)
 
-        new Logger<LogEntry>({
-            folder_path,
-            file_infix,
-            logs_until_rotation: 10,
+        new Logger<LoggerEntry>({
+            folder_path: folder_path,
+            infix: file_infix,
+            max_logs: 10,
         })
 
         expect(fs.existsSync(folder_path), "log folder dont exist").toBeTruthy()
@@ -92,10 +88,10 @@ describe("logger basic test", () => {
     test("correct log to file", () => {
         expect(fs.existsSync(file_path), "log file dont exist").toBeTruthy()
 
-        const logger = new Logger<LogEntry>(logOpts)
+        const logger = new Logger<LoggerEntry>(logOpts)
 
         logger
-            .level("INFO")
+            .level(log_entry.level)
             .message(log_entry.message)
             .add("id", log_entry.id)
             .add("meta", log_entry.meta)
@@ -109,9 +105,9 @@ describe("logger basic test", () => {
     test("correct second log to file", () => {
         expect(fs.existsSync(file_path), "log file dont exist").toBeTruthy()
 
-        const logger = new Logger<LogEntry>(logOpts)
+        const logger = new Logger<LoggerEntry>(logOpts)
         logger
-            .level("INFO")
+            .level(log_entry.level)
             .message(log_entry.message)
             .add("id", log_entry.id)
             .add("meta", log_entry.meta)
