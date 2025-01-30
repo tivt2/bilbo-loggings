@@ -5,7 +5,6 @@ export class LogFile {
     public line_count: number
 
     constructor(public file_path: string) {
-        this.line_count = 0
         if (!fs.existsSync(file_path)) {
             fs.appendFileSync(file_path, "")
         }
@@ -28,16 +27,18 @@ export class LogFile {
     // finish writing to file
     // then return file_path or reject
     async finish(): Promise<string> {
+        this.stream.end()
+
         return new Promise((resolve, reject) => {
-            this.stream.end()
             this.stream.on("finish", () => {
-                this.stream.close()
-                resolve(this.file_path)
+                this.stream.close(() => {
+                    resolve(this.file_path)
+                })
             })
             this.stream.on("error", (err) => {
                 console.error(`Failed to finish stream ${this.file_path}`)
                 console.error(err)
-                reject
+                reject()
             })
         })
     }
