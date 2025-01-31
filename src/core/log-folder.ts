@@ -3,7 +3,7 @@ import path from "path"
 import { exec } from "child_process"
 import { RotateFolder } from "./rotate-folder"
 
-export class LoggerFolder {
+export class LogFolder {
     public file_regex: RegExp
 
     constructor(
@@ -16,9 +16,7 @@ export class LoggerFolder {
         this.file_regex = new RegExp(
             `bilbo-${this.infix}-(\\d{4})-(\\d{1,2})-(\\d{1,2})-(\\d+).log(\\.gz)?`
         )
-    }
 
-    create_folder(): void {
         if (!fs.existsSync(this.folder_path)) {
             fs.mkdirSync(this.folder_path, { recursive: true })
         }
@@ -62,19 +60,14 @@ export class LoggerFolder {
             })
     }
 
-    // return files with valid naming sorted by year-month-day-id
-    get_valid_files(folder_path: string): string[] {
-        const valid_files = this.filter_valid_files(
-            fs.readdirSync(folder_path),
-            false
-        )
-
-        return valid_files
-    }
-
-    // assumes file_name is a string that matches this.file_regex
+    // match file_name against file_regex
     is_today_file(file_name: string): boolean {
-        const [_, year, month, day] = file_name.match(this.file_regex)!
+        const match = file_name.match(this.file_regex)!
+        if (!match) return false
+
+        const [_, year, month, day, id] = match
+        if (!id) return false
+
         const now = new Date()
         return (
             now.getUTCFullYear() === Number(year) &&
@@ -86,7 +79,10 @@ export class LoggerFolder {
     // retrieve the biggest id
     // for files in logger_folder and rotate_folder
     retrieve_biggest_file_id(): number {
-        const log_files = this.get_valid_files(this.folder_path)
+        const log_files = this.filter_valid_files(
+            fs.readdirSync(this.folder_path),
+            false
+        ).filter((file) => this.is_today_file(file))
 
         let biggest_log_file_id = 0
         if (log_files.length !== 0 && this.is_today_file(log_files[0])) {
@@ -95,9 +91,10 @@ export class LoggerFolder {
             )
         }
 
-        const rotate_files = this.get_valid_files(
-            this.rotate_folder.folder_path
-        )
+        const rotate_files = this.filter_valid_files(
+            fs.readdirSync(this.rotate_folder.folder_path),
+            true
+        ).filter((file) => this.is_today_file(file))
 
         let biggest_rotate_file_id = 0
         if (rotate_files.length !== 0 && this.is_today_file(rotate_files[0])) {
@@ -110,23 +107,36 @@ export class LoggerFolder {
     }
 
     // rotate the files that are 'old' in the folder
-    // return the newest file path if it matches the current date
-    recover_folder(): string {
-        const valid_files = this.get_valid_files(this.folder_path)
+    // return tuple [string, ...Promise]
+    // where the newest file_path at [0]
+    recover_folder(): [string] | [string, ...Promise<void>[]] {
+        const valid_files = this.filter_valid_files(
+            fs.readdirSync(this.folder_path),
+            false
+        )
+
+        const out = [
+            "",
+            ...Array.from({ length: valid_files.length }, () =>
+                Promise.resolve()
+            ),
+        ] as [string, ...Promise<void>[]]
+        out[0] = ""
         if (valid_files.length == 0) {
-            return ""
+            return out
         }
 
         for (let i = valid_files.length - 1; i > 0; i--) {
-            this.rotate_file(valid_files[i])
+            out[i + 1] = this.rotate_file(valid_files[i])
         }
 
         if (!this.is_today_file(valid_files[0])) {
-            this.rotate_file(valid_files[0])
-            return ""
+            out[1] = this.rotate_file(valid_files[0])
+            return out
         }
 
-        return path.join(this.folder_path, valid_files[0])
+        out[0] = path.join(this.folder_path, valid_files[0])
+        return out
     }
 
     // assume the file_name exists
@@ -144,7 +154,6 @@ export class LoggerFolder {
                     reject()
                 }
 
-                this.rotate_folder.create_folder()
                 fs.renameSync(file_path + ".gz", rotate_path)
 
                 console.log(`File: ${file_path} rotated successfully`)

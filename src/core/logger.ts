@@ -1,5 +1,5 @@
 import path from "path"
-import { LoggerFolder } from "./logger-folder"
+import { LogFolder } from "./log-folder"
 import { RotateFolder } from "./rotate-folder"
 import { LogFile } from "./log-file"
 
@@ -29,7 +29,7 @@ export type LoggerOptions<F extends LoggerFields> = {
 export class Logger<F extends LoggerFields> {
     private log_entry: Partial<F> = {}
 
-    private log_folder: LoggerFolder
+    private log_folder: LogFolder
     private rotate_folder: RotateFolder
 
     private log_file: LogFile
@@ -41,16 +41,14 @@ export class Logger<F extends LoggerFields> {
         this.rotate_folder = new RotateFolder(
             path.join(this.opts.folder_path, "rotate")
         )
-        this.log_folder = new LoggerFolder(
+        this.log_folder = new LogFolder(
             this.opts.folder_path,
             this.opts.infix,
             this.rotate_folder
         )
-        this.log_folder.create_folder()
-        this.rotate_folder.create_folder()
 
         this.log_file_id = this.log_folder.retrieve_biggest_file_id()
-        let file_path = this.log_folder.recover_folder()
+        let [file_path] = this.log_folder.recover_folder()
         if (file_path === "") {
             this.log_file_id++
             file_path = this.log_folder.create_file(this.log_file_id)

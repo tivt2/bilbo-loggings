@@ -18,7 +18,7 @@ function generate_file_path(
 }
 
 describe("logger basic test", () => {
-    const folder_path = path.normalize("./tests/log-files")
+    const folder_path = path.normalize("./tests/core/logger-tmp")
     const file_infix = "foo"
 
     const original_createWriteStream = fs.createWriteStream
