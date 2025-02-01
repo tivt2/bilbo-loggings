@@ -13,7 +13,7 @@ const opts: LoggerOptions<LogFields> = {
     folder_path: "./tests/log-files",
     infix: "foo",
     max_logs: 10,
-    print_mode: {
+    console: {
         levels: ["WARN"],
         pretty: true,
     },

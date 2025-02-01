@@ -4,7 +4,7 @@ import { describe, test, expect, beforeAll, afterAll } from "vitest"
 import { LogFile } from "../../src/core/log-file"
 
 describe("LogFile class unit tests", () => {
-    const test_tmp_folder = "./tests/core/log-file-tmp/"
+    const test_tmp_folder = "./tests/core/log-file"
 
     beforeAll(() => {
         if (fs.existsSync(test_tmp_folder)) {

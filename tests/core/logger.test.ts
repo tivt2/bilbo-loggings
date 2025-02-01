@@ -1,32 +1,42 @@
 import fs from "fs"
 import path from "path"
-import { describe, test, expect, beforeAll, afterAll } from "vitest"
+import { describe, test, expect, beforeAll, afterAll, beforeEach } from "vitest"
 import { Logger, LoggerOptions } from "../../src/core/logger"
 
-function generate_file_path(
-    folder_path: string,
-    infix: string,
-    id: number
-): string {
+describe("logger basic test", () => {
+    const tmp_folder_path = "./tests/core/logger-test"
+    const infix = "logger_test"
+
     const now = new Date()
     const year = now.getUTCFullYear()
     const month = now.getUTCMonth() + 1
     const day = now.getUTCDate()
-    const file_name = `bilbo-${infix}-${year}-${month}-${day}-${id}.log`
-    const file_path = path.normalize(path.join(folder_path, file_name))
-    return file_path
-}
 
-describe("logger basic test", () => {
-    const folder_path = path.normalize("./tests/core/logger-tmp")
-    const file_infix = "foo"
+    type LoggerEntry = {
+        level: "INFO" | "WARN"
+        message: string
+        id: number
+        meta: {
+            description: string
+        }
+    }
+    const log_opts: LoggerOptions<LoggerEntry> = {
+        folder_path: tmp_folder_path,
+        infix,
+        max_logs: 10,
+    }
+
+    const log_entry: LoggerEntry = {
+        level: "INFO",
+        message: "log message",
+        id: 12,
+        meta: {
+            description: "foo description",
+        },
+    }
 
     const original_createWriteStream = fs.createWriteStream
     beforeAll(() => {
-        if (fs.existsSync(folder_path)) {
-            fs.rmSync(folder_path, { recursive: true })
-        }
-
         // since im not testing the file system and 'fs' module
         // modifying createWriteStream used by the logger
         // so when calling .write method it will
@@ -41,54 +51,82 @@ describe("logger basic test", () => {
         }
     })
 
+    beforeEach(() => {
+        if (fs.existsSync(tmp_folder_path)) {
+            fs.rmSync(tmp_folder_path, { recursive: true })
+        }
+    })
+
     afterAll(() => {
         // return createWriteStream to the original function
         fs.createWriteStream = original_createWriteStream
+
+        if (fs.existsSync(tmp_folder_path)) {
+            fs.rmSync(tmp_folder_path, { recursive: true })
+        }
     })
 
-    type LoggerEntry = {
-        level: "INFO" | "WARN"
-        message: string
-        id: number
-        meta: {
-            description: string
-        }
-    }
-    const logOpts: LoggerOptions<LoggerEntry> = {
-        folder_path: folder_path,
-        infix: file_infix,
-        max_logs: 10,
-    }
+    test("instance creation + folders and log file creation", async () => {
+        new Logger(log_opts)
 
-    const log_entry: LoggerEntry = {
-        level: "INFO",
-        message: "log message",
-        id: 12,
-        meta: {
-            description: "foo description",
-        },
-    }
-
-    const file_path = generate_file_path(folder_path, file_infix, 1)
-
-    // order of tests matter
-    test("logger create folder if not exists and file", () => {
-        const file_path = generate_file_path(folder_path, file_infix, 1)
-
-        new Logger<LoggerEntry>({
-            folder_path: folder_path,
-            infix: file_infix,
-            max_logs: 10,
+        // wait for logger.recover()
+        await new Promise((resolve) => {
+            setTimeout(resolve, 0)
         })
 
-        expect(fs.existsSync(folder_path), "log folder dont exist").toBeTruthy()
-        expect(fs.existsSync(file_path), "log file dont exist").toBeTruthy()
+        expect(fs.existsSync(tmp_folder_path)).toBe(true)
+        expect(fs.existsSync(tmp_folder_path + "/rotate")).toBe(true)
+
+        const expected_file_name = `bilbo-${infix}-${year}-${month}-${day}-1.log`
+        const expected_file_path = path.join(
+            tmp_folder_path,
+            expected_file_name
+        )
+        expect(fs.existsSync(expected_file_path)).toBe(true)
     })
 
-    test("correct log to file", () => {
-        expect(fs.existsSync(file_path), "log file dont exist").toBeTruthy()
+    test("instance creation + folder recover", async () => {
+        fs.mkdirSync(tmp_folder_path, { recursive: true })
 
-        const logger = new Logger<LoggerEntry>(logOpts)
+        // old log file
+        const file_name1 = `bilbo-${infix}-${year - 1}-${month}-${day}-1.log`
+        const file_path1 = path.join(tmp_folder_path, file_name1)
+        fs.appendFileSync(file_path1, "")
+        // old log file
+        const file_name2 = `bilbo-${infix}-${year}-${month - 1}-${day}-1.log`
+        const file_path2 = path.join(tmp_folder_path, file_name2)
+        fs.appendFileSync(file_path2, "")
+
+        // newest log file
+        const file_name3 = `bilbo-${infix}-${year}-${month}-${day}-1.log`
+        const file_path3 = path.join(tmp_folder_path, file_name3)
+        fs.appendFileSync(file_path3, "")
+
+        new Logger(log_opts)
+
+        // wait for logger.recover()
+        await new Promise((resolve) => {
+            setTimeout(resolve, 500)
+        })
+
+        expect(fs.readdirSync(tmp_folder_path).sort()).toEqual(
+            ["rotate", file_name3].sort()
+        )
+        expect(fs.readdirSync(tmp_folder_path + "/rotate").sort()).toEqual(
+            [file_name1 + ".gz", file_name2 + ".gz"].sort()
+        )
+    })
+
+    test("correct log to file", async () => {
+        const logger = new Logger<LoggerEntry>(log_opts)
+
+        // wait for logger.recover()
+        await new Promise((resolve) => {
+            setTimeout(resolve, 0)
+        })
+
+        const file_name = `bilbo-${infix}-${year}-${month}-${day}-1.log`
+        const file_path = path.join(tmp_folder_path, file_name)
 
         logger
             .level(log_entry.level)
@@ -97,25 +135,58 @@ describe("logger basic test", () => {
             .add("meta", log_entry.meta)
             .log()
 
-        const file_data = String(fs.readFileSync(file_path))
-        const log_str = JSON.stringify(log_entry) + "\n"
+        let file_data = fs.readFileSync(file_path, "utf8")
+        let log_str = JSON.stringify(log_entry) + "\n"
+        expect(file_data, file_path).toEqual(log_str)
+
+        logger
+            .level(log_entry.level)
+            .message(log_entry.message)
+            .add("id", log_entry.id)
+            .add("meta", log_entry.meta)
+            .log()
+
+        file_data = fs.readFileSync(file_path, "utf8")
+        log_str += JSON.stringify(log_entry) + "\n"
         expect(file_data, file_path).toEqual(log_str)
     })
 
-    test("correct second log to file", () => {
-        expect(fs.existsSync(file_path), "log file dont exist").toBeTruthy()
+    test("biggest_file_id() after recover", async () => {
+        function make_file(
+            folder_path: string,
+            year: number,
+            month: number,
+            day: number,
+            id: number,
+            ext: string
+        ) {
+            if (!fs.existsSync(folder_path)) {
+                fs.mkdirSync(folder_path)
+            }
+            const file_name = `bilbo-${infix}-${year}-${month}-${day}-${id}${ext}`
+            const file_path = path.join(folder_path, file_name)
+            fs.appendFileSync(file_path, "")
+        }
+        make_file(tmp_folder_path, year, month, day, 10, ".log")
+        make_file(tmp_folder_path, year - 1, month, day, 1, ".log")
+        make_file(tmp_folder_path, year, month - 1, day, 1, ".log")
+        make_file(tmp_folder_path, year, month, day - 1, 1, ".log")
 
-        const logger = new Logger<LoggerEntry>(logOpts)
-        logger
-            .level(log_entry.level)
-            .message(log_entry.message)
-            .add("id", log_entry.id)
-            .add("meta", log_entry.meta)
-            .log()
+        const tmp_rotate_path = path.join(tmp_folder_path, "rotate")
+        make_file(tmp_rotate_path, year, month, day, 15, ".log.gz")
+        make_file(tmp_rotate_path, year - 1, month, day, 1, ".log.gz")
+        make_file(tmp_rotate_path, year, month - 1, day, 1, ".log.gz")
+        make_file(tmp_rotate_path, year, month, day - 1, 1, ".log.gz")
 
-        const file_data = String(fs.readFileSync(file_path))
-        const log_str =
-            JSON.stringify(log_entry) + "\n" + JSON.stringify(log_entry) + "\n"
-        expect(file_data).toEqual(log_str)
+        new Logger<LoggerEntry>(log_opts)
+
+        // wait for logger.recover()
+        await new Promise((resolve) => {
+            setTimeout(resolve, 500)
+        })
+
+        const expected_file_name = `bilbo-${infix}-${year}-${month}-${day}-${16}.log`
+        const files = fs.readdirSync(tmp_folder_path)
+        expect(files.sort()).toEqual([expected_file_name, "rotate"])
     })
 })
