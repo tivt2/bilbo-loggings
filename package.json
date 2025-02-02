@@ -1,16 +1,22 @@
 {
     "name": "bilbo-loggings",
     "version": "1.0.0",
-    "main": "index.js",
+    "description": "An exploration into logging and structured logging.",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
     "scripts": {
         "build": "rm -rf dist/ && npx tsc",
-        "dev": "npx ts-node src/index.ts",
-        "test": "vitest"
+        "prepublishOnly": "npm run build",
+        "dev:run": "npx ts-node src/index.ts",
+        "dev:test": "vitest"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/tivt2/bilbo-loggings.git"
     },
     "keywords": [],
-    "author": "",
-    "license": "ISC",
-    "description": "",
+    "author": "me",
+    "license": "MIT",
     "devDependencies": {
         "@types/node": "^22.10.10",
         "ts-node": "^10.9.2",
