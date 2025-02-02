@@ -25,19 +25,61 @@ export type LoggerOptions<F extends LoggerFields> = {
     }
 }
 
+interface Log<F extends LoggerFields> {
+    level(level: F["level"]): Log<F>
+    message(msg: string): Log<F>
+    add<K extends keyof LoggerGenericKeys<F>>(key: K, value: F[K]): Log<F>
+    log(): void
+}
+
+class LogEntry<F extends LoggerFields> implements Log<F> {
+    public entry: Partial<F> = {}
+
+    constructor(private log_fn: (log: LogEntry<F>) => void) {}
+
+    level(level: F["level"]): Log<F> {
+        this.entry.level = level
+        return this
+    }
+
+    message(msg: string): Log<F> {
+        this.entry.message = msg
+        return this
+    }
+
+    add<K extends keyof LoggerGenericKeys<F>>(key: K, value: F[K]): Log<F> {
+        this.entry[key] = value
+        return this
+    }
+
+    log(): void {
+        this.log_fn(this)
+    }
+
+    reset(): void {
+        for (const key of Object.keys(this.entry)) {
+            delete this.entry[key]
+        }
+    }
+}
+
 export class Logger<F extends LoggerFields> {
-    private log_entry: Partial<F> = {}
+    private log_pool: Log<F>[] = []
 
     private log_folder: LogFolder
     private rotate_folder: RotateFolder
 
-    private log_file: LogFile | undefined
+    private log_file: LogFile
     private log_file_id: number = 1
 
     constructor(private opts: LoggerOptions<F>) {
-        this.opts.folder_path = path.normalize(this.opts.folder_path)
+        if (opts.max_logs < 1) {
+            throw new Error("Logger Options.max_logs must be a positive number")
+        }
 
+        this.opts.folder_path = path.normalize(this.opts.folder_path)
         const file_regex = create_file_regex(this.opts.infix)
+
         this.rotate_folder = new RotateFolder(
             path.join(this.opts.folder_path, "rotate"),
             new RegExp(file_regex.source + ".gz")
@@ -131,10 +173,6 @@ export class Logger<F extends LoggerFields> {
     }
 
     private rotate_cur_file(): void {
-        if (!this.log_file) {
-            return
-        }
-
         this.log_file.finish().then((file_path) => {
             this.rotate_folder.rotate_file(file_path)
         })
@@ -146,38 +184,35 @@ export class Logger<F extends LoggerFields> {
     }
 
     // assumes options.print_mode != undefined
-    private print_log(): void {
+    private print_log(entry: Partial<F>): void {
         if (this.opts.console!.pretty) {
             console.log(
-                `\x1b[48;5;15m\x1b[38;5;16m ${this.log_entry.level} \x1b[m ${this.log_entry.message}`
+                `\x1b[48;5;15m\x1b[38;5;16m ${entry.level} \x1b[m ${entry.message}`
             )
         } else {
-            console.log(`${this.log_entry.level}: ${this.log_entry.message}`)
+            console.log(`${entry.level}: ${entry.message}`)
         }
     }
 
     level(level: F["level"]) {
-        this.log_entry.level = level
-        return this
-    }
+        let log = this.log_pool.pop()
 
-    message(msg: string) {
-        this.log_entry.message = msg
-        return this
-    }
-
-    add<K extends keyof LoggerGenericKeys<F>>(key: K, value: F[K]) {
-        this.log_entry[key] = value
-        return this
-    }
-
-    log(): void {
-        if (!this.log_file) {
-            return
+        if (log === undefined) {
+            log = new LogEntry<F>(this.log.bind(this))
         }
 
-        if (!this.log_entry.level) {
-            throw new Error("Log entry must have a valid level")
+        log.level(level)
+        return log
+    }
+
+    // logger .log() method will only be called by
+    // instances of LogEntry during its .log() call
+    private log(log: LogEntry<F>): void {
+        if (!log.entry.level) {
+            console.error("Log entry must have a valid level")
+            log.reset()
+            this.log_pool.push(log)
+            return
         }
 
         if (this.log_file.line_count >= this.opts.max_logs) {
@@ -186,17 +221,17 @@ export class Logger<F extends LoggerFields> {
 
         if (
             this.opts.console !== undefined &&
-            this.opts.console.levels.includes(this.log_entry.level)
+            this.opts.console.levels.includes(log.entry.level)
         ) {
-            this.print_log()
+            this.print_log(log.entry)
         }
 
-        if (!this.log_file.write_ln(JSON.stringify(this.log_entry))) {
-            throw new Error("Log was not writen to file")
+        if (!this.log_file.write_ln(JSON.stringify(log.entry))) {
+            // TODO: fallback?
+            console.error("Log was not writen to file")
         }
 
-        for (const key of Object.keys(this.log_entry)) {
-            delete this.log_entry[key]
-        }
+        log.reset()
+        this.log_pool.push(log)
     }
 }

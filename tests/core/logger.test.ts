@@ -106,7 +106,7 @@ describe("logger basic test", () => {
 
         // wait for logger.recover()
         await new Promise((resolve) => {
-            setTimeout(resolve, 500)
+            setTimeout(resolve, 200)
         })
 
         expect(fs.readdirSync(tmp_folder_path).sort()).toEqual(
@@ -118,15 +118,19 @@ describe("logger basic test", () => {
     })
 
     test("correct log to file", async () => {
-        const logger = new Logger<LoggerEntry>(log_opts)
+        const custom_opts: LoggerOptions<LoggerEntry> = {
+            ...log_opts,
+            max_logs: 1,
+        }
+        const logger = new Logger<LoggerEntry>(custom_opts)
 
         // wait for logger.recover()
         await new Promise((resolve) => {
             setTimeout(resolve, 0)
         })
 
-        const file_name = `bilbo-${infix}-${year}-${month}-${day}-1.log`
-        const file_path = path.join(tmp_folder_path, file_name)
+        const file_name1 = `bilbo-${infix}-${year}-${month}-${day}-1.log`
+        const file_path1 = path.join(tmp_folder_path, file_name1)
 
         logger
             .level(log_entry.level)
@@ -135,20 +139,29 @@ describe("logger basic test", () => {
             .add("meta", log_entry.meta)
             .log()
 
-        let file_data = fs.readFileSync(file_path, "utf8")
-        let log_str = JSON.stringify(log_entry) + "\n"
-        expect(file_data, file_path).toEqual(log_str)
+        const file_data1 = fs.readFileSync(file_path1, "utf8")
+        const log_str1 = JSON.stringify(log_entry) + "\n"
+        expect(file_data1, file_path1).toEqual(log_str1)
 
         logger
             .level(log_entry.level)
             .message(log_entry.message)
-            .add("id", log_entry.id)
+            .add("id", log_entry.id + 1)
             .add("meta", log_entry.meta)
             .log()
+        // wait .rotate_file()
+        await new Promise((resolve) => {
+            setTimeout(resolve, 200)
+        })
+        console.log(fs.readdirSync(tmp_folder_path))
 
-        file_data = fs.readFileSync(file_path, "utf8")
-        log_str += JSON.stringify(log_entry) + "\n"
-        expect(file_data, file_path).toEqual(log_str)
+        const file_name2 = `bilbo-${infix}-${year}-${month}-${day}-2.log`
+        const file_path2 = path.join(tmp_folder_path, file_name2)
+
+        const file_data2 = fs.readFileSync(file_path2, "utf8")
+        const log_str2 =
+            JSON.stringify({ ...log_entry, id: log_entry.id + 1 }) + "\n"
+        expect(file_data2, file_path2).toEqual(log_str2)
     })
 
     test("biggest_file_id() after recover", async () => {
@@ -182,7 +195,7 @@ describe("logger basic test", () => {
 
         // wait for logger.recover()
         await new Promise((resolve) => {
-            setTimeout(resolve, 500)
+            setTimeout(resolve, 200)
         })
 
         const expected_file_name = `bilbo-${infix}-${year}-${month}-${day}-${16}.log`
