@@ -1,6 +1,6 @@
 {
     "name": "bilbo-loggings",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "An exploration into logging and structured logging.",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
@@ -10,6 +10,11 @@
         "dev:run": "npx ts-node src/index.ts",
         "dev:test": "vitest"
     },
+    "files": [
+        "dist",
+        "package.json",
+        "README.md"
+    ],
     "repository": {
         "type": "git",
         "url": "https://github.com/tivt2/bilbo-loggings.git"
