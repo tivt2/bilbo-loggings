@@ -117,7 +117,7 @@ describe("logger basic test", () => {
         )
     })
 
-    test("correct log to file", async () => {
+    test("correct log to file + rotation at max_logs", async () => {
         const custom_opts: LoggerOptions<LoggerEntry> = {
             ...log_opts,
             max_logs: 1,
@@ -153,7 +153,6 @@ describe("logger basic test", () => {
         await new Promise((resolve) => {
             setTimeout(resolve, 200)
         })
-        console.log(fs.readdirSync(tmp_folder_path))
 
         const file_name2 = `bilbo-${infix}-${year}-${month}-${day}-2.log`
         const file_path2 = path.join(tmp_folder_path, file_name2)

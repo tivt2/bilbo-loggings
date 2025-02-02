@@ -17,7 +17,7 @@ Bilbo is the core logging system, the idea here is to minimize memory allocation
 
 It uses field chaining on the interface and manage its fields maintaining a structured nature. It relies on accepting a generic type when creating the logger instance to define the fields and levels of the logger so it has user defined constraint and thus enforces the correct types for each field.
 
-Bilbo automatic manage log files and implements log rotation based on log count, also defined by the user. When initialized, it creates a dedicated folder for rotated log files, which are compressed using 'gzip' to optimize disk usage, this ensures a better disk memory efficiency for stored logs. Logs are currently being compressed syncronously.
+Log files are stored as .log extension but they are actualy .ndjson(newline delimited json). It automaticaly manage log files and implements log rotation based on log count, also defined by the user. When initialized, it creates a dedicated folder for rotated log files, which are compressed using 'gzip' to optimize disk usage, this ensures a better disk memory efficiency for stored logs. Logs are currently being compressed syncronously.
 
 Currently, the logger is built to handle only single-threaded environment, so its not reliable to work in a system using worker threads, although it can be used in a way where each thread writes to a separated log file(distinguished by an 'infix' in the filename, e.g.: 'bilbo-infix_here-2025-1-20-1.log'), while this allows for multi-threaded use, using the same file names will corrupt the logs.
 
