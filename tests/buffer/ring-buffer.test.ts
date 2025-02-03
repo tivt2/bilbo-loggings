@@ -107,9 +107,10 @@ describe("RingBuffer unit tests", () => {
         buffer.enqueue(input[3])
 
         let cur = 0
+        expect(buffer.count).toEqual(input.length)
         for (const item of buffer.flush()) {
             expect(item).toEqual(input[cur])
-            expect(buffer.count).toEqual(input.length - cur)
+            expect(buffer.count).toEqual(input.length - cur - 1)
             cur++
         }
     })

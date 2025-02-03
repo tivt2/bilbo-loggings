@@ -3,6 +3,7 @@ import { LogFolder } from "./log-folder"
 import { RotateFolder } from "./rotate-folder"
 import { LogFile } from "./log-file"
 import { create_file_regex } from "./util"
+import RingBuffer from "../buffer/ring-buffer"
 
 type LoggerGenericKeys<F extends LoggerFields> = Omit<
     Omit<F, "level">,
@@ -18,7 +19,8 @@ export type LoggerFields = {
 export type LoggerOptions<F extends LoggerFields> = {
     folder_path: string
     infix: string
-    max_logs: number
+    max_logs_rotate: number
+    fallback_size: number
     console?: {
         levels: F["level"][]
         pretty: boolean
@@ -33,22 +35,26 @@ interface Log<F extends LoggerFields> {
 }
 
 class LogEntry<F extends LoggerFields> implements Log<F> {
-    public entry: Partial<F> = {}
+    public _entry: Partial<F> = {}
 
     constructor(private log_fn: (log: LogEntry<F>) => void) {}
 
+    get entry(): Partial<F> {
+        return this._entry
+    }
+
     level(level: F["level"]): Log<F> {
-        this.entry.level = level
+        this._entry.level = level
         return this
     }
 
     message(msg: string): Log<F> {
-        this.entry.message = msg
+        this._entry.message = msg
         return this
     }
 
     add<K extends keyof LoggerGenericKeys<F>>(key: K, value: F[K]): Log<F> {
-        this.entry[key] = value
+        this._entry[key] = value
         return this
     }
 
@@ -57,8 +63,8 @@ class LogEntry<F extends LoggerFields> implements Log<F> {
     }
 
     reset(): void {
-        for (const key of Object.keys(this.entry)) {
-            delete this.entry[key]
+        for (const key of Object.keys(this._entry)) {
+            delete this._entry[key]
         }
     }
 }
@@ -66,16 +72,27 @@ class LogEntry<F extends LoggerFields> implements Log<F> {
 export class Logger<F extends LoggerFields> {
     private log_pool: Log<F>[] = []
 
+    private flushing_promise = Promise.resolve(true)
+    private is_flushing = false
+
+    private is_fallback_mode = false
+    private fallback_buffer: RingBuffer<string>
+
     private log_folder: LogFolder
     private rotate_folder: RotateFolder
 
     private log_file: LogFile
-    private log_file_id: number = 1
+    private log_file_id = 1
 
     constructor(private opts: LoggerOptions<F>) {
-        if (opts.max_logs < 1) {
+        if (this.opts.max_logs_rotate < 1) {
             throw new Error("Logger Options.max_logs must be a positive number")
         }
+        if (this.opts.fallback_size < 1) {
+            throw new Error("Logger Options.batch_size must be 1 or more")
+        }
+
+        this.fallback_buffer = new RingBuffer<string>(this.opts.fallback_size)
 
         this.opts.folder_path = path.normalize(this.opts.folder_path)
         const file_regex = create_file_regex(this.opts.infix)
@@ -93,7 +110,7 @@ export class Logger<F extends LoggerFields> {
         this.log_folder.init_folder()
         this.rotate_folder.init_folder()
 
-        let file_path = this.recover()
+        let file_path = this.recover_logger()
         if (file_path === "") {
             file_path = this.log_folder.create_file(this.log_file_id)
         }
@@ -108,7 +125,7 @@ export class Logger<F extends LoggerFields> {
     // rotate 'old' files
     // return newest file from today
     // else return ""
-    private recover(): string {
+    private recover_logger(): string {
         this.log_file_id = this.retrieve_biggest_file_id()
 
         const valid_files = this.log_folder.get_log_files()
@@ -194,7 +211,8 @@ export class Logger<F extends LoggerFields> {
         }
     }
 
-    level(level: F["level"]) {
+    // returns a Log<F> with level set
+    level(level: F["level"]): Log<F> {
         let log = this.log_pool.pop()
 
         if (log === undefined) {
@@ -205,30 +223,78 @@ export class Logger<F extends LoggerFields> {
         return log
     }
 
+    private async flush_fallback(): Promise<boolean> {
+        if (this.is_flushing) return this.flushing_promise
+
+        this.is_flushing = true
+
+        return new Promise((resolve_flushing) => {
+            if (this.fallback_buffer.count === 0) {
+                this.is_flushing = false
+                resolve_flushing(true)
+                return
+            }
+
+            for (const log of this.fallback_buffer.flush()) {
+                if (!this.log_file.write_ln(log)) {
+                    this.is_flushing = false
+                    resolve_flushing(false)
+                    return
+                }
+            }
+
+            this.is_flushing = false
+            resolve_flushing(true)
+        })
+    }
+
+    private async fallback_mode(): Promise<void> {
+        if (this.is_fallback_mode) return
+
+        this.is_fallback_mode = true
+        this.flushing_promise = Promise.resolve(false)
+
+        this.log_file.stream.once("drain", () => {
+            this.flushing_promise = this.flush_fallback()
+        })
+    }
+
     // logger .log() method will only be called by
     // instances of LogEntry during its .log() call
-    private log(log: LogEntry<F>): void {
-        if (!log.entry.level) {
+    private async log(log: LogEntry<F>): Promise<void> {
+        if (!log._entry.level) {
             console.error("Log entry must have a valid level")
             log.reset()
             this.log_pool.push(log)
             return
         }
 
-        if (this.log_file.line_count >= this.opts.max_logs) {
+        if (this.log_file.line_count >= this.opts.max_logs_rotate) {
             this.rotate_cur_file()
         }
 
         if (
             this.opts.console !== undefined &&
-            this.opts.console.levels.includes(log.entry.level)
+            this.opts.console.levels.includes(log._entry.level)
         ) {
-            this.print_log(log.entry)
+            this.print_log(log._entry)
         }
 
-        if (!this.log_file.write_ln(JSON.stringify(log.entry))) {
-            // TODO: fallback?
-            console.error("Log was not writen to file")
+        const log_entry_str = JSON.stringify(log.entry)
+
+        if (this.is_fallback_mode) {
+            if (!(await this.flushing_promise)) {
+                this.fallback_buffer.enqueue(log_entry_str)
+                this.flushing_promise = this.flush_fallback()
+            } else {
+                this.is_fallback_mode = false
+
+                if (!this.log_file.write_ln(log_entry_str)) {
+                    this.fallback_mode()
+                }
+            }
+        } else if (!this.log_file.write_ln(log_entry_str)) {
+            this.fallback_mode()
         }
 
         log.reset()

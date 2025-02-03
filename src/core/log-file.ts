@@ -16,12 +16,11 @@ export class LogFile {
         this.stream = fs.createWriteStream(file_path, { flags: "a" })
     }
 
-    write_ln(log: string) {
-        if (!this.stream.write(log + "\n")) {
-            return false
-        }
+    write_ln(data: string) {
+        const has_writen = this.stream.write(data + "\n")
+
         this.line_count++
-        return true
+        return has_writen
     }
 
     // finish writing to file

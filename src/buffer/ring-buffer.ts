@@ -68,6 +68,14 @@ export default class RingBuffer<T> {
         return this.buffer[this.head]
     }
 
+    peek_tail(): T | undefined {
+        if (this._count === 0) {
+            return
+        }
+
+        return this.buffer[this.tail !== 0 ? this.tail - 1 : this.size - 1]
+    }
+
     // destructive iterator
     // empty the ring-buffer
     *flush(): Generator<T, void, void> {
@@ -79,9 +87,9 @@ export default class RingBuffer<T> {
             const data = this.buffer[this.head]
             this.buffer[this.head] = undefined
             this.head = (this.head + 1) % this.size
+            this._count--
 
             yield data as T
-            this._count--
         }
 
         this.head = 0

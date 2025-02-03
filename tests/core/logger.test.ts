@@ -3,7 +3,7 @@ import path from "path"
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from "vitest"
 import { Logger, LoggerOptions } from "../../src/core/logger"
 
-describe("logger basic test", () => {
+describe("Logger class unit tests", () => {
     const tmp_folder_path = "./tests/core/logger-test"
     const infix = "logger_test"
 
@@ -23,7 +23,8 @@ describe("logger basic test", () => {
     const log_opts: LoggerOptions<LoggerEntry> = {
         folder_path: tmp_folder_path,
         infix,
-        max_logs: 10,
+        max_logs_rotate: 10,
+        fallback_size: 10,
     }
 
     const log_entry: LoggerEntry = {
@@ -120,7 +121,7 @@ describe("logger basic test", () => {
     test("correct log to file + rotation at max_logs", async () => {
         const custom_opts: LoggerOptions<LoggerEntry> = {
             ...log_opts,
-            max_logs: 1,
+            max_logs_rotate: 1,
         }
         const logger = new Logger<LoggerEntry>(custom_opts)
 
@@ -200,5 +201,108 @@ describe("logger basic test", () => {
         const expected_file_name = `bilbo-${infix}-${year}-${month}-${day}-${16}.log`
         const files = fs.readdirSync(tmp_folder_path)
         expect(files.sort()).toEqual([expected_file_name, "rotate"])
+    })
+})
+
+describe("Logger fallback system", () => {
+    const tmp_folder_path = "./tests/core/logger-fallback-test"
+    const infix = "logger_fallback_test"
+
+    type LoggerEntry = {
+        level: "INFO" | "WARN"
+        message: string
+    }
+    const log_opts: LoggerOptions<LoggerEntry> = {
+        folder_path: tmp_folder_path,
+        infix,
+        max_logs_rotate: 100,
+        fallback_size: 4,
+    }
+
+    const log_entry: LoggerEntry = {
+        level: "INFO",
+        message: "log message",
+    }
+
+    const original_createWriteStream = fs.createWriteStream
+
+    const tester = {
+        buffer: new Buffer(""),
+        file_data: "",
+        backpressure: true,
+        stream_buffer: "",
+        drain: () => {},
+    }
+
+    beforeAll(() => {
+        fs.createWriteStream = (file_path: any, options?: any) => {
+            const stream = original_createWriteStream(file_path, options)
+            stream.write = (chunk: any, encoding: any, _callback?: any) => {
+                tester.buffer = Buffer.concat([
+                    tester.buffer,
+                    Buffer.from(chunk),
+                ])
+                return tester.backpressure
+            }
+            stream.once("drain", () => {
+                console.log("drain event!")
+                console.log("file_data", tester.buffer)
+            })
+
+            tester.drain = function () {
+                tester.file_data += String(tester.buffer)
+                tester.buffer = new Buffer("")
+                tester.backpressure = true
+                stream.emit("drain")
+            }
+            return stream
+        }
+    })
+
+    beforeEach(() => {
+        if (fs.existsSync(tmp_folder_path)) {
+            fs.rmSync(tmp_folder_path, { recursive: true })
+        }
+    })
+
+    afterAll(() => {
+        fs.createWriteStream = original_createWriteStream
+
+        if (fs.existsSync(tmp_folder_path)) {
+            fs.rmSync(tmp_folder_path, { recursive: true })
+        }
+    })
+
+    test("correctly enter fallback mode when stream backpressure returns false", async () => {
+        const logger = new Logger(log_opts)
+
+        // wait for logger.recover()
+        await new Promise((resolve) => {
+            setTimeout(resolve, 0)
+        })
+
+        tester.backpressure = false
+        logger.level("INFO").message("foo").log()
+        logger.level("INFO").message("bar").log()
+        logger.level("INFO").message("baz").log()
+        tester.drain()
+
+        // wait for logger.flush_fallback()
+        await new Promise((resolve) => {
+            setTimeout(resolve, 0)
+        })
+
+        const expected_file_data =
+            JSON.stringify({ level: "INFO", message: "foo" }) + "\n"
+
+        const expected_buffer_data = new Buffer(
+            JSON.stringify({ level: "INFO", message: "bar" }) +
+                "\n" +
+                JSON.stringify({ level: "INFO", message: "baz" }) +
+                "\n"
+        )
+
+        expect(tester.file_data).toEqual(expected_file_data)
+        expect(tester.buffer).toEqual(expected_buffer_data)
     })
 })
