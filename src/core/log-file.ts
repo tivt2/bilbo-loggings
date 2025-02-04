@@ -17,10 +17,8 @@ export class LogFile {
     }
 
     write_ln(data: string) {
-        const has_writen = this.stream.write(data + "\n")
-
         this.line_count++
-        return has_writen
+        return this.stream.write(data + "\n")
     }
 
     // finish writing to file

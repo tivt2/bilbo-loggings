@@ -110,7 +110,12 @@ describe("RingBuffer unit tests", () => {
         expect(buffer.count).toEqual(input.length)
         for (const item of buffer.flush()) {
             expect(item).toEqual(input[cur])
-            expect(buffer.count).toEqual(input.length - cur - 1)
+
+            // count is only updated in the next iteration
+            // in cases where flushing happens
+            // only if a condition is meet by the iner logic of
+            // the for loop
+            expect(buffer.count).toEqual(input.length - cur)
             cur++
         }
     })

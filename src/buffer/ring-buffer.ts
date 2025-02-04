@@ -85,11 +85,11 @@ export default class RingBuffer<T> {
 
         while (this._count > 0) {
             const data = this.buffer[this.head]
+            yield data as T
+
             this.buffer[this.head] = undefined
             this.head = (this.head + 1) % this.size
             this._count--
-
-            yield data as T
         }
 
         this.head = 0

@@ -219,40 +219,46 @@ describe("Logger fallback system", () => {
         fallback_size: 4,
     }
 
-    const log_entry: LoggerEntry = {
-        level: "INFO",
-        message: "log message",
-    }
-
     const original_createWriteStream = fs.createWriteStream
 
     const tester = {
-        buffer: new Buffer(""),
+        buffer: Buffer.from(""),
         file_data: "",
         backpressure: true,
-        stream_buffer: "",
-        drain: () => {},
+        drain: (_partial: boolean) => {},
+        reset() {
+            tester.buffer = Buffer.from("")
+            tester.file_data = ""
+            tester.backpressure = true
+        },
     }
 
     beforeAll(() => {
         fs.createWriteStream = (file_path: any, options?: any) => {
             const stream = original_createWriteStream(file_path, options)
-            stream.write = (chunk: any, encoding: any, _callback?: any) => {
+            stream.write = (chunk: any, _encoding: any, _callback?: any) => {
                 tester.buffer = Buffer.concat([
                     tester.buffer,
                     Buffer.from(chunk),
                 ])
-                return tester.backpressure
+                return !tester.backpressure
             }
-            stream.once("drain", () => {
-                console.log("drain event!")
-                console.log("file_data", tester.buffer)
-            })
 
-            tester.drain = function () {
-                tester.file_data += String(tester.buffer)
-                tester.buffer = new Buffer("")
-                tester.backpressure = true
+            tester.drain = function (partial: boolean) {
+                if (partial) {
+                    const middle = Math.floor(tester.buffer.length / 2)
+                    const buf_slice = tester.buffer.toString().slice(0, middle)
+                    tester.file_data += buf_slice
+                    tester.buffer = Buffer.from(
+                        tester.buffer.toString().slice(middle)
+                    )
+                    tester.backpressure = true
+                } else {
+                    tester.file_data += String(tester.buffer)
+                    tester.buffer = Buffer.from("")
+                    tester.backpressure = false
+                }
+
                 stream.emit("drain")
             }
             return stream
@@ -263,6 +269,7 @@ describe("Logger fallback system", () => {
         if (fs.existsSync(tmp_folder_path)) {
             fs.rmSync(tmp_folder_path, { recursive: true })
         }
+        tester.reset()
     })
 
     afterAll(() => {
@@ -273,7 +280,143 @@ describe("Logger fallback system", () => {
         }
     })
 
-    test("correctly enter fallback mode when stream backpressure returns false", async () => {
+    test("fallback mode + flushing after drain", async () => {
+        const logger = new Logger(log_opts)
+
+        const log1: LoggerEntry = { level: "INFO", message: "foo" }
+        const log2: LoggerEntry = { level: "INFO", message: "bar" }
+        const log3: LoggerEntry = { level: "INFO", message: "baz" }
+        const log1_str = JSON.stringify(log1)
+        const log2_str = JSON.stringify(log2)
+        const log3_str = JSON.stringify(log3)
+
+        // wait for logger.recover()
+        await new Promise((resolve) => {
+            setTimeout(resolve, 0)
+        })
+
+        tester.backpressure = true
+        // write to stream_buffer and start fallback mode
+        await logger.level(log1.level).message(log1.message).log()
+        expect(tester.buffer).toEqual(Buffer.from(log1_str + "\n"))
+        expect(tester.file_data).toEqual("")
+
+        // write to fallback_buffer
+        await logger.level(log2.level).message(log2.message).log()
+        expect(tester.buffer).toEqual(Buffer.from(log1_str + "\n"))
+        expect(tester.file_data).toEqual("")
+
+        // write to fallback_buffer
+        await logger.level(log3.level).message(log3.message).log()
+        expect(tester.buffer).toEqual(Buffer.from(log1_str + "\n"))
+        expect(tester.file_data).toEqual("")
+
+        // drain stream_buffer to file_data
+        // write all fallback_buffer into stream_buffer
+        tester.drain(false)
+
+        const expected_file_data = log1_str + "\n"
+        const expected_buffer_data = Buffer.from(
+            log2_str + "\n" + log3_str + "\n"
+        )
+
+        expect(tester.file_data).toEqual(expected_file_data)
+        expect(tester.buffer.toString()).toEqual(
+            expected_buffer_data.toString()
+        )
+    })
+
+    test("fallback mode + partial flushing", async () => {
+        const logger = new Logger(log_opts)
+
+        const log1: LoggerEntry = { level: "INFO", message: "foo" }
+        const log2: LoggerEntry = { level: "INFO", message: "bar" }
+        const log3: LoggerEntry = { level: "INFO", message: "baz" }
+        const log4: LoggerEntry = { level: "INFO", message: "fizzbuzz" }
+        const log1_str = JSON.stringify(log1)
+        const log2_str = JSON.stringify(log2)
+        const log3_str = JSON.stringify(log3)
+        const log4_str = JSON.stringify(log4)
+
+        // wait for logger.recover()
+        await new Promise((resolve) => {
+            setTimeout(resolve, 0)
+        })
+
+        tester.backpressure = true
+        // first log writen to stream_buffer and enter fallback mode
+        await logger.level(log1.level).message(log1.message).log()
+
+        expect(tester.file_data).toEqual("")
+        expect(tester.buffer).toEqual(Buffer.from(log1_str + "\n"))
+
+        // second and third log writen to fallback_buffer
+        await logger.level(log2.level).message(log2.message).log()
+        await logger.level(log3.level).message(log3.message).log()
+
+        // makes a partial flushing
+        // it tries to flush but stops at the first write (log2)
+        // fallback_buffer must contain only log3
+        // and enter fallback mode again
+        tester.drain(true)
+
+        // drain wrote partialy what was on buffer to file_data
+        const middle = Math.floor((log1_str + "\n").length / 2)
+        let expected_file_data = (log1_str + "\n").slice(0, middle)
+
+        // drain wrote only first element of fallback_buffer to stream_buffer
+        let expected_buffer_data = Buffer.from(
+            (log1_str + "\n").slice(middle) + log2_str + "\n"
+        )
+        expect(tester.file_data).toEqual(expected_file_data)
+        expect(tester.buffer.toString()).toEqual(
+            expected_buffer_data.toString()
+        )
+
+        // fourth log writen to fallback_buffer
+        await logger.level(log4.level).message(log4.message).log()
+
+        // makes a full flush
+        tester.drain(false)
+
+        expected_file_data = log1_str + "\n" + log2_str + "\n"
+        expected_buffer_data = Buffer.from(log3_str + "\n" + log4_str + "\n")
+
+        expect(tester.file_data).toEqual(expected_file_data)
+        expect(tester.buffer.toString()).toEqual(
+            expected_buffer_data.toString()
+        )
+    })
+
+    test("fallback mode + fallback buffer overwrite", async () => {
+        const logger = new Logger({ ...log_opts, fallback_size: 1 })
+
+        const log1: LoggerEntry = { level: "INFO", message: "foo" }
+        const log2: LoggerEntry = { level: "INFO", message: "bar" }
+        const log3: LoggerEntry = { level: "INFO", message: "baz" }
+        const log1_str = JSON.stringify(log1)
+        const log3_str = JSON.stringify(log3)
+
+        // wait for logger.recover()
+        await new Promise((resolve) => {
+            setTimeout(resolve, 0)
+        })
+
+        tester.backpressure = true
+        await logger.level(log1.level).message(log1.message).log()
+        await logger.level(log2.level).message(log2.message).log()
+        await logger.level(log3.level).message(log3.message).log()
+
+        tester.drain(false)
+
+        const expected_file_data = log1_str + "\n"
+        const expected_buffer_data = Buffer.from(log3_str + "\n")
+
+        expect(tester.file_data).toEqual(expected_file_data)
+        expect(tester.buffer).toEqual(expected_buffer_data)
+    })
+
+    test("multiple async log() calls + preserve order", async () => {
         const logger = new Logger(log_opts)
 
         // wait for logger.recover()
@@ -281,28 +424,48 @@ describe("Logger fallback system", () => {
             setTimeout(resolve, 0)
         })
 
-        tester.backpressure = false
-        logger.level("INFO").message("foo").log()
-        logger.level("INFO").message("bar").log()
-        logger.level("INFO").message("baz").log()
-        tester.drain()
+        const amount = 100
+        const promises: Promise<void>[] = []
 
-        // wait for logger.flush_fallback()
+        for (let i = 0; i < amount; i++) {
+            promises.push(logger.level("INFO").message(`Log ${i}`).log())
+        }
+
+        await Promise.all(promises)
+        tester.drain(false)
+
+        const lines = tester.file_data.trim().split("\n")
+        for (const i in lines) {
+            expect(lines[i]).toEqual(
+                JSON.stringify({ level: "INFO", message: `Log ${i}` })
+            )
+        }
+    })
+
+    test("multiple calls with backpressure from stream_buffer", async () => {
+        const logger = new Logger({ ...log_opts, fallback_size: 3 })
+
+        // wait for logger.recover()
         await new Promise((resolve) => {
             setTimeout(resolve, 0)
         })
 
-        const expected_file_data =
-            JSON.stringify({ level: "INFO", message: "foo" }) + "\n"
+        const amount = 100
+        tester.backpressure = true
+        for (let i = 0; i < amount; i++) {
+            await logger.level("INFO").message(`Log ${i}`).log()
+        }
+        tester.drain(false)
 
-        const expected_buffer_data = new Buffer(
-            JSON.stringify({ level: "INFO", message: "bar" }) +
-                "\n" +
-                JSON.stringify({ level: "INFO", message: "baz" }) +
-                "\n"
+        expect(tester.file_data).toEqual(
+            JSON.stringify({ level: "INFO", message: "Log 0" }) + "\n"
         )
 
-        expect(tester.file_data).toEqual(expected_file_data)
-        expect(tester.buffer).toEqual(expected_buffer_data)
+        const buffer_lines = tester.buffer.toString().trim().split("\n")
+        expect(buffer_lines).toEqual([
+            JSON.stringify({ level: "INFO", message: `Log ${97}` }),
+            JSON.stringify({ level: "INFO", message: `Log ${98}` }),
+            JSON.stringify({ level: "INFO", message: `Log ${99}` }),
+        ])
     })
 })
