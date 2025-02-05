@@ -14,7 +14,6 @@ describe("Logger class unit tests", () => {
 
     type LoggerEntry = {
         level: "INFO" | "WARN"
-        message: string
         id: number
         meta: {
             description: string
@@ -27,8 +26,9 @@ describe("Logger class unit tests", () => {
         fallback_size: 10,
     }
 
-    const log_entry: LoggerEntry = {
-        level: "INFO",
+    const log_entry = {
+        level: "INFO" as const,
+        created_at: 0,
         message: "log message",
         id: 12,
         meta: {
@@ -37,6 +37,7 @@ describe("Logger class unit tests", () => {
     }
 
     const original_createWriteStream = fs.createWriteStream
+    const original_date_now = Date.now
     beforeAll(() => {
         // since im not testing the file system and 'fs' module
         // modifying createWriteStream used by the logger
@@ -50,6 +51,8 @@ describe("Logger class unit tests", () => {
             }
             return stream
         }
+
+        Date.now = () => 0
     })
 
     beforeEach(() => {
@@ -61,6 +64,8 @@ describe("Logger class unit tests", () => {
     afterAll(() => {
         // return createWriteStream to the original function
         fs.createWriteStream = original_createWriteStream
+
+        Date.now = original_date_now
 
         if (fs.existsSync(tmp_folder_path)) {
             fs.rmSync(tmp_folder_path, { recursive: true })
@@ -211,6 +216,7 @@ describe("Logger fallback system", () => {
     type LoggerEntry = {
         level: "INFO" | "WARN"
         message: string
+        created_at: number
     }
     const log_opts: LoggerOptions<LoggerEntry> = {
         folder_path: tmp_folder_path,
@@ -218,8 +224,6 @@ describe("Logger fallback system", () => {
         max_logs_rotate: 100,
         fallback_size: 4,
     }
-
-    const original_createWriteStream = fs.createWriteStream
 
     const tester = {
         buffer: Buffer.from(""),
@@ -232,6 +236,9 @@ describe("Logger fallback system", () => {
             tester.backpressure = true
         },
     }
+
+    const original_createWriteStream = fs.createWriteStream
+    const original_date_now = Date.now
 
     beforeAll(() => {
         fs.createWriteStream = (file_path: any, options?: any) => {
@@ -263,6 +270,8 @@ describe("Logger fallback system", () => {
             }
             return stream
         }
+
+        Date.now = () => 0
     })
 
     beforeEach(() => {
@@ -275,6 +284,8 @@ describe("Logger fallback system", () => {
     afterAll(() => {
         fs.createWriteStream = original_createWriteStream
 
+        Date.now = original_date_now
+
         if (fs.existsSync(tmp_folder_path)) {
             fs.rmSync(tmp_folder_path, { recursive: true })
         }
@@ -283,9 +294,21 @@ describe("Logger fallback system", () => {
     test("fallback mode + flushing after drain", async () => {
         const logger = new Logger(log_opts)
 
-        const log1: LoggerEntry = { level: "INFO", message: "foo" }
-        const log2: LoggerEntry = { level: "INFO", message: "bar" }
-        const log3: LoggerEntry = { level: "INFO", message: "baz" }
+        const log1: LoggerEntry = {
+            level: "INFO",
+            created_at: 0,
+            message: "foo",
+        }
+        const log2: LoggerEntry = {
+            level: "INFO",
+            created_at: 0,
+            message: "bar",
+        }
+        const log3: LoggerEntry = {
+            level: "INFO",
+            created_at: 0,
+            message: "baz",
+        }
         const log1_str = JSON.stringify(log1)
         const log2_str = JSON.stringify(log2)
         const log3_str = JSON.stringify(log3)
@@ -329,10 +352,26 @@ describe("Logger fallback system", () => {
     test("fallback mode + partial flushing", async () => {
         const logger = new Logger(log_opts)
 
-        const log1: LoggerEntry = { level: "INFO", message: "foo" }
-        const log2: LoggerEntry = { level: "INFO", message: "bar" }
-        const log3: LoggerEntry = { level: "INFO", message: "baz" }
-        const log4: LoggerEntry = { level: "INFO", message: "fizzbuzz" }
+        const log1: LoggerEntry = {
+            level: "INFO",
+            created_at: 0,
+            message: "foo",
+        }
+        const log2: LoggerEntry = {
+            level: "INFO",
+            created_at: 0,
+            message: "bar",
+        }
+        const log3: LoggerEntry = {
+            level: "INFO",
+            created_at: 0,
+            message: "baz",
+        }
+        const log4: LoggerEntry = {
+            level: "INFO",
+            created_at: 0,
+            message: "fizzbuzz",
+        }
         const log1_str = JSON.stringify(log1)
         const log2_str = JSON.stringify(log2)
         const log3_str = JSON.stringify(log3)
@@ -391,9 +430,21 @@ describe("Logger fallback system", () => {
     test("fallback mode + fallback buffer overwrite", async () => {
         const logger = new Logger({ ...log_opts, fallback_size: 1 })
 
-        const log1: LoggerEntry = { level: "INFO", message: "foo" }
-        const log2: LoggerEntry = { level: "INFO", message: "bar" }
-        const log3: LoggerEntry = { level: "INFO", message: "baz" }
+        const log1: LoggerEntry = {
+            level: "INFO",
+            created_at: 0,
+            message: "foo",
+        }
+        const log2: LoggerEntry = {
+            level: "INFO",
+            created_at: 0,
+            message: "bar",
+        }
+        const log3: LoggerEntry = {
+            level: "INFO",
+            created_at: 0,
+            message: "baz",
+        }
         const log1_str = JSON.stringify(log1)
         const log3_str = JSON.stringify(log3)
 
@@ -437,7 +488,11 @@ describe("Logger fallback system", () => {
         const lines = tester.file_data.trim().split("\n")
         for (const i in lines) {
             expect(lines[i]).toEqual(
-                JSON.stringify({ level: "INFO", message: `Log ${i}` })
+                JSON.stringify({
+                    level: "INFO",
+                    created_at: 0,
+                    message: `Log ${i}`,
+                })
             )
         }
     })
@@ -458,14 +513,27 @@ describe("Logger fallback system", () => {
         tester.drain(false)
 
         expect(tester.file_data).toEqual(
-            JSON.stringify({ level: "INFO", message: "Log 0" }) + "\n"
+            JSON.stringify({ level: "INFO", created_at: 0, message: "Log 0" }) +
+                "\n"
         )
 
         const buffer_lines = tester.buffer.toString().trim().split("\n")
         expect(buffer_lines).toEqual([
-            JSON.stringify({ level: "INFO", message: `Log ${97}` }),
-            JSON.stringify({ level: "INFO", message: `Log ${98}` }),
-            JSON.stringify({ level: "INFO", message: `Log ${99}` }),
+            JSON.stringify({
+                level: "INFO",
+                created_at: 0,
+                message: `Log ${97}`,
+            }),
+            JSON.stringify({
+                level: "INFO",
+                created_at: 0,
+                message: `Log ${98}`,
+            }),
+            JSON.stringify({
+                level: "INFO",
+                created_at: 0,
+                message: `Log ${99}`,
+            }),
         ])
     })
 })

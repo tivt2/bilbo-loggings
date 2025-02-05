@@ -6,7 +6,6 @@
     "types": "dist/index.d.ts",
     "scripts": {
         "build": "rm -rf dist/ && npx tsc",
-        "prepublishOnly": "npm run build",
         "dev:run": "npx ts-node src/index.ts",
         "dev:test": "vitest"
     },

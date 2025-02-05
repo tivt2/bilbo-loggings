@@ -5,32 +5,38 @@ import { LogFile } from "./log-file"
 import { create_file_regex } from "./util"
 import RingBuffer from "../buffer/ring-buffer"
 
-type LoggerGenericKeys<F extends LoggerFields> = Omit<
-    Omit<F, "level">,
-    "message"
->
+type LoggerLevels = Uppercase<string>
 
-export type LoggerFields = {
-    level: Uppercase<string>
-    message: string
+type UserFields = {
+    level: LoggerLevels
     [key: string]: any
 }
 
-export type LoggerOptions<F extends LoggerFields> = {
+type LoggerMandatory = {
+    level: LoggerLevels
+    message: string
+    created_at: number
+}
+
+type LoggerFields = LoggerMandatory & UserFields
+
+export type LoggerOptions<U extends UserFields> = {
     folder_path: string
     infix: string
     max_logs_rotate: number
     fallback_size: number
     console?: {
-        levels: F["level"][]
+        levels: U["level"][]
         pretty: boolean
     }
 }
 
 interface Log<F extends LoggerFields> {
-    level(level: F["level"]): Log<F>
     message(msg: string): Log<F>
-    add<K extends keyof LoggerGenericKeys<F>>(key: K, value: F[K]): Log<F>
+    add<K extends keyof Omit<F, keyof LoggerMandatory>>(
+        key: K,
+        value: F[K]
+    ): Log<F>
     log(): Promise<void>
 }
 
@@ -43,7 +49,7 @@ class LogEntry<F extends LoggerFields> implements Log<F> {
         return this._entry
     }
 
-    level(level: F["level"]): Log<F> {
+    level(level: F["level"]) {
         this._entry.level = level
         return this
     }
@@ -53,7 +59,12 @@ class LogEntry<F extends LoggerFields> implements Log<F> {
         return this
     }
 
-    add<K extends keyof LoggerGenericKeys<F>>(key: K, value: F[K]): Log<F> {
+    created_at(date: number): Log<F> {
+        this._entry.created_at = date
+        return this
+    }
+
+    add<K extends keyof F>(key: K, value: F[K]): Log<F> {
         this._entry[key] = value
         return this
     }
@@ -69,8 +80,11 @@ class LogEntry<F extends LoggerFields> implements Log<F> {
     }
 }
 
-export class Logger<F extends LoggerFields> {
-    private log_pool: Log<F>[] = []
+export class Logger<
+    U extends UserFields,
+    F extends LoggerFields = U & LoggerMandatory,
+> {
+    private log_pool: LogEntry<F>[] = []
 
     private flushed_promise = Promise.resolve(true)
     private is_fallback_mode = false
@@ -82,7 +96,7 @@ export class Logger<F extends LoggerFields> {
     private log_file: LogFile
     private log_file_id = 1
 
-    constructor(private opts: LoggerOptions<F>) {
+    constructor(private opts: LoggerOptions<U>) {
         if (this.opts.max_logs_rotate < 1) {
             throw new Error("Logger Options.max_logs must be a positive number")
         }
@@ -218,6 +232,8 @@ export class Logger<F extends LoggerFields> {
         }
 
         log.level(level)
+        log.created_at(Date.now())
+
         return log
     }
 
@@ -253,7 +269,6 @@ export class Logger<F extends LoggerFields> {
         this.flushed_promise = Promise.resolve(false)
 
         this.log_file.stream.once("drain", () => {
-            console.log("draining", [...this.fallback_buffer])
             this.flushed_promise = this.flush_fallback()
         })
     }
