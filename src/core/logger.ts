@@ -2,7 +2,7 @@ import path from "path"
 import { LogFolder } from "./log-folder"
 import { RotateFolder } from "./rotate-folder"
 import { LogFile } from "./log-file"
-import { create_file_regex } from "./util"
+import { ansi_text, create_file_regex } from "./util"
 import RingBuffer from "../buffer/ring-buffer"
 
 type LoggerLevels = Uppercase<string>
@@ -96,12 +96,19 @@ export class Logger<
     private log_file: LogFile
     private log_file_id = 1
 
+    private ansi_wraper: ((text: string) => string)[] = []
+
     constructor(private opts: LoggerOptions<U>) {
         if (this.opts.max_logs_rotate < 1) {
             throw new Error("Logger Options.max_logs must be a positive number")
         }
         if (this.opts.fallback_size < 1) {
             throw new Error("Logger Options.batch_size must be 1 or more")
+        }
+        if (this.opts.console) {
+            for (let i = 0; i < this.opts.console.levels.length; i++) {
+                this.ansi_wraper[i] = (text: string) => ansi_text(text, i)
+            }
         }
 
         this.fallback_buffer = new RingBuffer<string>(this.opts.fallback_size)
@@ -214,13 +221,22 @@ export class Logger<
 
     // assumes options.print_mode != undefined
     private print_log(entry: Partial<F>): void {
-        if (this.opts.console!.pretty) {
-            console.log(
-                `\x1b[48;5;15m\x1b[38;5;16m ${entry.level} \x1b[m ${entry.message}`
-            )
-        } else {
+        if (!this.opts.console || !this.opts.console.pretty) {
             console.log(`${entry.level}: ${entry.message}`)
+            return
         }
+
+        if (!entry.level) return
+        const level_idx = this.opts.console.levels.findIndex(
+            (pred) => pred === entry.level
+        )
+        if (level_idx === -1) {
+            console.log(`${entry.level}: ${entry.message}`)
+            return
+        }
+
+        const level_str = this.ansi_wraper[level_idx](` ${entry.level} `)
+        console.log(`${level_str} ${entry.message}`)
     }
 
     // returns a Log<F> with level set
