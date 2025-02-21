@@ -1,20 +1,20 @@
-import { Bilbo } from "./core/bilbo"
-import { Loggings } from "./core/loggings"
+import { Bilbo } from "./bilbo/bilbo"
 
-const unix_sock = "bilbo-loggings.sock"
+const unix_sock = "/tmp/bilbo-loggings.sock"
+const log_file = "./loggings.ndjson"
 
-if (process.argv[2] === "bilbo") {
-    const bilbo = new Bilbo(unix_sock)
+;(async () => {
+    const bilbo = Bilbo.logger(unix_sock, log_file)
+    const bilbo2 = Bilbo.logger(unix_sock, log_file)
+    const bilbo3 = Bilbo.logger(unix_sock, log_file)
 
-    for (let i = 0; i < 500; i++) {
-        bilbo.log({ id: process.argv[3] })
+    for (let i = 0; i < 2; i++) {
+        bilbo.DEBUG("bilbo message").log()
+        bilbo2.DEBUG("bilbo2 message").log()
+        bilbo3.DEBUG("bilbo3 message").log()
     }
 
-    bilbo.server.then((server) => {
-        server.end()
-    })
-} else if (process.argv[2] === "loggings") {
-    new Loggings(unix_sock)
-} else {
-    console.info(`invalid mode ${process.argv[2]}`)
-}
+    bilbo.close()
+    bilbo2.close()
+    bilbo3.close()
+})()
