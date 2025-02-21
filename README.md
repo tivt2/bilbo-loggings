@@ -34,3 +34,18 @@ Safe multi-threading, there is a consideration on implementing a separated proce
 ### Loggings
 
 UI and monitoring part of the system, it will serve a localhost port with html to display information and data of the log files, a basic monitoring tool for the logs produces by bilbo, where it will have live tail monitoring as well as being able to provide stats about the client program overall.
+
+
+
+## TODO
+
+- study more of node.js streams
+- logger is just a pipeline disposing logs into the stream
+  of a separated process(responsible to write to log file)
+  where they communicate via UNIX socket.
+- the writer process process data via a pipeline,
+  accumulating logs into batches and processing them
+  when a batch of 'n' elements is made or when a batch timout
+  is reached
+- the same process has the ability to open a http local server
+  to serve real time analytics of the data
