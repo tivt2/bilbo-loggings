@@ -1,6 +1,6 @@
 import net from "node:net"
-import fs from "node:fs"
 import { LoggingsSpawner } from "./loggings_spawn"
+import { UNIX_SOCK_PATH } from "../constants"
 
 type LoggerMandatory = {
     level: "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL"
@@ -70,18 +70,15 @@ export class Bilbo<
 
     public log_pool: LogEntry<F>[] = []
 
-    private constructor(
-        public unix_sock_path: string,
-        public log_file_path: string
-    ) {
+    private constructor(public log_file_path: string) {
         this.server = new Promise((resolve) => {
             const server = net
-                .connect(this.unix_sock_path)
+                .connect(UNIX_SOCK_PATH)
                 .on("data", (data: Buffer) => {
                     switch (data.toString()) {
                         case "awk":
-                            console.log("logger connected")
-                            console.log("----------------\n")
+                            console.log("Bilbo connected")
+                            console.log("---------------")
                             resolve(server)
                             break
                         default:
@@ -90,7 +87,7 @@ export class Bilbo<
                     }
                 })
                 .on("error", (error) => {
-                    console.error("Socket error:", error)
+                    console.error("Bilbo Socket error:", error)
                     server.end()
                 })
                 .on("end", () => {
@@ -99,16 +96,12 @@ export class Bilbo<
         })
     }
 
-    static logger<U extends UserFields>(
-        unix_sock_path: string,
+    static async logger<U extends UserFields>(
         log_file_path: string
-    ): Bilbo<U> {
-        LoggingsSpawner.spawn(unix_sock_path, log_file_path)
-        while (!fs.existsSync(unix_sock_path)) {
-            // wait loggings to spawn
-        }
+    ): Promise<Bilbo<U>> {
+        await LoggingsSpawner.spawn(log_file_path)
 
-        return new Bilbo<U>(unix_sock_path, log_file_path)
+        return new Bilbo<U>(log_file_path)
     }
 
     async close(): Promise<void> {

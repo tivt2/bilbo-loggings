@@ -2,3 +2,5 @@ node_modules/
 dist/
 tests/log-files/
 .npmignore
+
+loggings.ndjson

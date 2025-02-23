@@ -1,42 +1,47 @@
 import fs from "node:fs"
 import path from "node:path"
 import child_process from "node:child_process"
+import { UNIX_SOCK_PATH } from "../constants"
 
 export class LoggingsSpawner {
-    static async spawn(
-        unix_sock_path: string,
-        log_file_path: string
-    ): Promise<boolean> {
-        if (fs.existsSync(unix_sock_path)) {
-            return true
+    private static spawn_timeout_ms: number = 1000
+    static async spawn(log_file_path: string): Promise<void> {
+        if (fs.existsSync(UNIX_SOCK_PATH)) {
+            return
         }
-        console.log("loggings not running")
+        const program_path = path.join(__dirname, "../loggings/index")
 
-        // temporary to test with ts-node
-        const ts_node_path = path.join(
-            __dirname,
-            "../../node_modules/.bin/ts-node"
-        )
-        const program_path = path.join(__dirname, "../loggings/index.ts")
-        //
-
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             const child = child_process.spawn(
-                ts_node_path,
-                [program_path, unix_sock_path, log_file_path],
+                "node",
+                [program_path, log_file_path],
                 {
                     detached: true,
-                    stdio: ["ignore", process.stdout, process.stdout],
+                    stdio: ["ignore", process.stdout, process.stderr],
                 }
             )
 
             child.on("error", (error) => {
-                console.error("Failed to spawn loggings")
-                throw error
+                console.error("Loggings error:")
+                reject(error)
             })
             child.on("spawn", () => {
-                console.log("spawned")
-                resolve(true)
+                console.log("Loggings created")
+                setTimeout(() => {
+                    let created = fs.existsSync(UNIX_SOCK_PATH)
+                    while (!created) {
+                        // wait for the timeout duration checking for socket creation
+                    }
+                    if (created) {
+                        resolve(undefined)
+                    } else {
+                        reject(
+                            new Error(
+                                `Failed to spawn Loggings in ${this.spawn_timeout_ms} ms`
+                            )
+                        )
+                    }
+                }, this.spawn_timeout_ms)
             })
         })
     }
